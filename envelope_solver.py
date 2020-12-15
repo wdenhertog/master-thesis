@@ -67,7 +67,7 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
     # reserve 2 rows for the ghost grid points at j = nz and j = nz+1 and 2 columns for t = -nt and t = (nt+1)*dt
     # so now the first column of a is 0, and the second column of a is the initial condition.
     a = np.zeros((nz + 2, nt + 2), dtype=complex)
-    a[:, 1] = np.concatenate((a0, np.zeros(2)))
+    a[:, 0] = a[:, 1] = np.concatenate((a0, np.zeros(2)))
 
     dz = (zmax - zmin) / (nz - 1)
 
@@ -80,5 +80,5 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
             factor_rhs = -(c0m - 1j / dt * D(a, j - 1, n, dz)) * a[j - 1][n - 1] - 2 * np.exp(
                 1j * (theta(a, j - 1, n) - theta(a, j, n))) / (dt * dz) * (a[j][n + 1] - a[j][n - 1]) + np.exp(
                 1j * (theta(a, j - 1, n) - theta(a, j + 1, n))) / (dt * dz) * (a[j + 1][n + 1] - a[j + 1][n - 1])
-            a[j-1][n+1] = factor_rhs / factor_lhs
+            a[j - 1][n + 1] = factor_rhs / factor_lhs
     return a
