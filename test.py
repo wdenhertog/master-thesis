@@ -15,6 +15,5 @@ a0 = amp * np.sqrt(np.exp(-Z ** 2 / (2 * L ** 2)))
 
 a = solve_1d(k0p, zmin, zmax, nz, dt, nt, a0)
 
-plt.plot(Z, abs(a[0:-2, 1]))
-plt.plot(Z, abs(a[0:-2, -2]))
+plt.plot(Z, abs(a[0:-2]))
 plt.show()
