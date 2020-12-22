@@ -1,7 +1,9 @@
 import cmath
 import numpy as np
+from numba import njit
 
 
+@njit()
 def L(sign, k, dr):
     """
     Calculation of L_k^{+-}
@@ -24,6 +26,7 @@ def L(sign, k, dr):
             return 0
 
 
+@njit()
 def C(sign, k, k0p, dt, dz, dr):
     """
     Calculate Equation (8) from Benedetti - 2018
@@ -41,6 +44,7 @@ def C(sign, k, k0p, dt, dz, dr):
         return L(0, k, dr) / 2 + sign * 1j * k0p * 1 / dt - sign * 3 / 2 * 1 / (dt * dz) - 1 / dt ** 2  # 2D case
 
 
+@njit()
 def theta(a, j, k=0):
     """
     Calculate the phase of â
@@ -55,6 +59,7 @@ def theta(a, j, k=0):
         return cmath.phase(a[j][k])  # 2D case
 
 
+@njit()
 def D(a, j, k, dz):
     """
     Calculate D in Equation (6) from Benedetti - 2018
@@ -67,10 +72,12 @@ def D(a, j, k, dz):
     return (-3 * theta(a, j, k) + 4 * theta(a, j + 1, k) - theta(a, j + 2, k)) / (2 * dz)
 
 
+@njit()
 def chi(j, k, n):
-    return 1  # TODO: implement calculation of chi at time n and position (z,r) = (j,k).
+    return 0  # TODO: implement calculation of chi at time n and position (z,r) = (j,k).
 
 
+@njit()
 def TDMA(a, b, c, d):
     """
     TriDiagonal Matrix Algorithm: solve a linear system Ax=b, where A is a tridiagonal matrix.
@@ -82,9 +89,9 @@ def TDMA(a, b, c, d):
     :return: solution to the linear system
     """
     n = len(d)
-    w = np.zeros(n - 1, complex)
-    g = np.zeros(n, complex)
-    p = np.zeros(n, complex)
+    w = np.zeros(n - 1, dtype=np.complex128)
+    g = np.zeros(n, dtype=np.complex128)
+    p = np.zeros(n, dtype=np.complex128)
 
     w[0] = c[0] / b[0]  # MAKE SURE THAT b[0]!=0
     g[0] = d[0] / b[0]
@@ -99,6 +106,7 @@ def TDMA(a, b, c, d):
     return p
 
 
+@njit
 def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
     """
     Solve the 1D envelope equation, without second time derivative and without chi:
@@ -126,18 +134,19 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
     for n in range(0, nt):
         for j in range(nz, 0, -1):
             factor_lhs = c0p + 1j / dt * D(a_current, j - 1, 0, dz)
-            factor_rhs = -(c0m - 1j / dt * D(a_current, j - 1, 0, dz)) \
-                         * a_old[j - 1] \
-                         - 2 * np.exp(1j * (theta(a_current, j - 1) - theta(a_current, j))) / (dt * dz) \
-                         * (a_new[j] - a_old[j]) \
-                         + np.exp(1j * (theta(a_current, j - 1) - theta(a_current, j + 1))) / (2 * dt * dz) \
-                         * (a_new[j + 1] - a_old[j + 1])
+            factor_rhs = (-(c0m - 1j / dt * D(a_current, j - 1, 0, dz))
+                          * a_old[j - 1]
+                          - 2 * np.exp(1j * (theta(a_current, j - 1) - theta(a_current, j))) / (dt * dz)
+                          * (a_new[j] - a_old[j])
+                          + np.exp(1j * (theta(a_current, j - 1) - theta(a_current, j + 1))) / (2 * dt * dz)
+                          * (a_new[j + 1] - a_old[j + 1]))
             a_new[j - 1] = factor_rhs / factor_lhs
         a_old = a_current
         a_current = a_new
     return a_new
 
 
+@njit()
 def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
     """
     Solve the 2D envelope equation (\nabla_tr^2+2i*k0/kp*d/dt+2*d^2/(dzdt)-d^2/dt^2)â = \chi*â
@@ -153,19 +162,25 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
     :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
     """
     # a_old corresponds to a(z, r, t-1), a_current corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
-    a_old = np.r_[a0, np.zeros((2, nr))].astype(complex)  # TODO: implement function for a(z,r,-1)
-    a_current = np.r_[a0, np.zeros((2, nr))].astype(complex)  # add 2 rows of ghost points in the zeta direction
-    a_new = np.zeros((nz + 2, nr), dtype=complex)
+    a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
+    a_current = np.zeros((nz + 2, nr), dtype=np.complex128)
+    a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
+    a_old[0:-2] = a0  # TODO: implement function for a(z,r,-1)
+    a_current[0:-2] = a0
 
     dz = (zmax - zmin) / (nz - 1)
     dr = rmax / (nr - 1)
+
     for t in range(0, nt):
-        print("Time =", t)
+        if t > 0 and t % 100 == 0:
+            print("Time =", t)
         # For every j, solve the tridiagonal system to calculate the solution over on the radius
         for j in range(nz, 0, -1):
             # boundary conditions for k = 0 and k = nr - 1
-            d_upper = d_lower = np.zeros(nr - 1).astype(complex)
-            d_main = sol = np.zeros(nr).astype(complex)
+            d_upper = np.zeros(nr - 1, dtype=np.complex128)
+            d_lower = np.zeros(nr - 1, dtype=np.complex128)
+            d_main = np.zeros(nr, dtype=np.complex128)
+            sol = np.zeros(nr, dtype=np.complex128)
             d_main[0] = C(1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) / 2 + 1j / dt * D(a_current, j - 1, 0, dz)
             d_main[-1] = (C(1, nr - 1, k0p, dt, dz, dr)
                           - chi(j - 1, nr - 1, t) / 2 + 1j / dt * D(a_current, j - 1, nr - 1, dz))
@@ -178,14 +193,14 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
                       + np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j + 1, 0))) / (2 * dt * dz)
                       * (a_new[j + 1][0] - a_old[j + 1][0]))
             m = nr - 1  # using m instead of nr - 1 so the code occupies less width
-            sol[-1] = (-2 / dt ** 2 * a_current[j - 1][m] - L(-1, m, dr) / 2 * a_old[j - 1][m - 1]
+            sol[-1] = (-2 / dt ** 2 * a_current[j - 1][m]
+                       - L(-1, m, dr) / 2 * a_old[j - 1][m - 1]
                        - (C(-1, m, k0p, dt, dz, dr) - chi(j - 1, m, t) - 1j / dt * D(a_current, j - 1, m, dz))
                        * a_old[j - 1][m]
                        - 2 * np.exp(1j * (theta(a_current, j - 1, m) - theta(a_current, j, m))) / (dt * dz)
                        * (a_new[j][m] - a_old[j][m])
                        + np.exp(1j * (theta(a_current, j - 1, m) - theta(a_current, j + 1, m))) / (2 * dt * dz)
                        * (a_new[j + 1][m] - a_old[j + 1][m]))
-
             for k in range(1, nr - 1):
                 d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) / 2 + 1j / dt * D(a_current, j - 1, k, dz)
                 sol[k] = (-2 / dt ** 2 * a_current[j - 1][k]
@@ -198,9 +213,9 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
                           + np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j + 1, k))) / (2 * dt * dz)
                           * (a_new[j + 1][k] - a_old[j + 1][k]))
                 d_lower[k - 1] = L(-1, k, dr) / 2
-                d_upper[k - 1] = L(1, k, dr) / 2
-            d_lower[nr - 2] = L(-1, nr - 2, dr) / 2
-            d_upper[nr - 2] = L(1, nr - 2, dr) / 2
+                d_upper[k - 1] = L(1, k-1, dr) / 2
+            d_lower[-1] = L(-1, nr - 1, dr) / 2
+            d_upper[-1] = L(1, nr - 2, dr) / 2
             a_new[j - 1] = TDMA(d_lower, d_main, d_upper, sol)
         a_old = a_current
         a_current = a_new
