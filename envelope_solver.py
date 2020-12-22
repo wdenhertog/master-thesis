@@ -43,27 +43,46 @@ def C(sign, k, k0p, dt, dz, dr):
     else:
         return L(0, k, dr) / 2 + sign * 1j * k0p * 1 / dt - sign * 3 / 2 * 1 / (dt * dz) - 1 / dt ** 2  # 2D case
 
-
 @njit()
-def theta(a, j, k=0):
+def theta1D(a, j):
     """
-    Calculate the phase of â
+    Calculate the phase of â in the 1D model
     :param a: vector â at a specific time t
     :param j: the zeta grid coordinate: 0<=j<nz
-    :param k: the rho grid coordinate: 0<=k<nr
     :return: phase of â in â(z, t)
     """
-    if k == 0:
-        return cmath.phase(a[j][k])  # 1D case
-    else:
-        return cmath.phase(a[j][k])  # 2D case
+    return cmath.phase(a[j])
+
+
+@njit()
+def theta(a, j, k):
+    """
+    Calculate the phase of â in the 2D model
+    :param a: matrix â at a specific time t
+    :param j: the zeta grid coordinate: 0<=j<nz
+    :param k: the rho grid coordinate: 0<=k<nr
+    :return: phase of â in â(z, r, t)
+    """
+    return cmath.phase(a[j][k])
+
+
+@njit()
+def D1D(a, j, dz):
+    """
+    Calculate D in Equation (6) from Benedetti - 2018 (1D case)
+    :param a: vector â at a specific time t
+    :param j: the zeta grid coordinate: 0<=j<nz
+    :param dz: zeta step
+    :return: D_{j}^n
+    """
+    return (-3 * theta1D(a, j) + 4 * theta1D(a, j + 1) - theta1D(a, j + 2)) / (2 * dz)
 
 
 @njit()
 def D(a, j, k, dz):
     """
     Calculate D in Equation (6) from Benedetti - 2018
-    :param a: vector â at a specific time t
+    :param a: matrix â at a specific time t
     :param j: the zeta grid coordinate: 0<=j<nz
     :param k: the rho grid coordinate: 0<=k<nr
     :param dz: zeta step
@@ -106,7 +125,7 @@ def TDMA(a, b, c, d):
     return p
 
 
-@njit
+@njit()
 def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
     """
     Solve the 1D envelope equation, without second time derivative and without chi:
@@ -133,12 +152,12 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
 
     for n in range(0, nt):
         for j in range(nz, 0, -1):
-            factor_lhs = c0p + 1j / dt * D(a_current, j - 1, 0, dz)
-            factor_rhs = (-(c0m - 1j / dt * D(a_current, j - 1, 0, dz))
+            factor_lhs = c0p + 1j / dt * D1D(a_current, j - 1, dz)
+            factor_rhs = (-(c0m - 1j / dt * D1D(a_current, j - 1, dz))
                           * a_old[j - 1]
-                          - 2 * np.exp(1j * (theta(a_current, j - 1) - theta(a_current, j))) / (dt * dz)
+                          - 2 * np.exp(1j * (theta1D(a_current, j - 1) - theta1D(a_current, j))) / (dt * dz)
                           * (a_new[j] - a_old[j])
-                          + np.exp(1j * (theta(a_current, j - 1) - theta(a_current, j + 1))) / (2 * dt * dz)
+                          + np.exp(1j * (theta1D(a_current, j - 1) - theta1D(a_current, j + 1))) / (2 * dt * dz)
                           * (a_new[j + 1] - a_old[j + 1]))
             a_new[j - 1] = factor_rhs / factor_lhs
         a_old = a_current
@@ -213,7 +232,7 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
                           + np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j + 1, k))) / (2 * dt * dz)
                           * (a_new[j + 1][k] - a_old[j + 1][k]))
                 d_lower[k - 1] = L(-1, k, dr) / 2
-                d_upper[k - 1] = L(1, k-1, dr) / 2
+                d_upper[k - 1] = L(1, k - 1, dr) / 2
             d_lower[-1] = L(-1, nr - 1, dr) / 2
             d_upper[-1] = L(1, nr - 2, dr) / 2
             a_new[j - 1] = TDMA(d_lower, d_main, d_upper, sol)
