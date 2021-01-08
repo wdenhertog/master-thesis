@@ -1,6 +1,11 @@
 import cmath
 import numpy as np
-from numba import njit
+from numba import njit, prange
+
+
+@njit()
+def testfunc(z, zm):
+    return -4 * (z - zm)**2
 
 
 @njit()
@@ -42,6 +47,7 @@ def C(sign, k, k0p, dt, dz, dr):
         return L(-1, k, dr) / 2 + sign * 1j * k0p * 1 / dt - sign * 3 / 2 * 1 / (dt * dz)  # 1D case
     else:
         return L(0, k, dr) / 2 + sign * 1j * k0p * 1 / dt - sign * 3 / 2 * 1 / (dt * dz) - 1 / dt ** 2  # 2D case
+
 
 @njit()
 def theta1D(a, j):
@@ -165,8 +171,8 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
     return a_new
 
 
-@njit()
-def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
+@njit(parallel=True)
+def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
     """
     Solve the 2D envelope equation (\nabla_tr^2+2i*k0/kp*d/dt+2*d^2/(dzdt)-d^2/dt^2)â = \chi*â
     :param k0p: k0/kp = central laser wavenumber (2pi/lambda_0) / plasma skin depth
@@ -178,28 +184,29 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
     :param rmax: maximum value for rho (minimum value is always 0). rho = k_p*r (nondimensionalized radius)
     :param nr: number of rho steps
     :param a0: value for â(z,r,0), array of dimensions (nz, nr)
+    :param aold: value for â(z,r,-1), array of dimensions (nz, nr)
     :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
     """
     # a_old corresponds to a(z, r, t-1), a_current corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
     a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
     a_current = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
-    a_old[0:-2] = a0  # TODO: implement function for a(z,r,-1)
+    a_old[0:-2] = aold
     a_current[0:-2] = a0
 
     dz = (zmax - zmin) / (nz - 1)
     dr = rmax / (nr - 1)
 
     for t in range(0, nt):
-        if t > 0 and t % 100 == 0:
-            print("Time =", t)
+        if t % 100 == 0:
+            print("Time =", t * dt)
         # For every j, solve the tridiagonal system to calculate the solution over on the radius
         for j in range(nz, 0, -1):
-            # boundary conditions for k = 0 and k = nr - 1
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
+            # boundary conditions for k = 0 and k = nr - 1
             d_main[0] = C(1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) / 2 + 1j / dt * D(a_current, j - 1, 0, dz)
             d_main[-1] = (C(1, nr - 1, k0p, dt, dz, dr)
                           - chi(j - 1, nr - 1, t) / 2 + 1j / dt * D(a_current, j - 1, nr - 1, dz))
@@ -211,16 +218,17 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
                       * (a_new[j][0] - a_old[j][0])
                       + np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j + 1, 0))) / (2 * dt * dz)
                       * (a_new[j + 1][0] - a_old[j + 1][0]))
-            m = nr - 1  # using m instead of nr - 1 so the code occupies less width
-            sol[-1] = (-2 / dt ** 2 * a_current[j - 1][m]
-                       - L(-1, m, dr) / 2 * a_old[j - 1][m - 1]
-                       - (C(-1, m, k0p, dt, dz, dr) - chi(j - 1, m, t) - 1j / dt * D(a_current, j - 1, m, dz))
-                       * a_old[j - 1][m]
-                       - 2 * np.exp(1j * (theta(a_current, j - 1, m) - theta(a_current, j, m))) / (dt * dz)
-                       * (a_new[j][m] - a_old[j][m])
-                       + np.exp(1j * (theta(a_current, j - 1, m) - theta(a_current, j + 1, m))) / (2 * dt * dz)
-                       * (a_new[j + 1][m] - a_old[j + 1][m]))
-            for k in range(1, nr - 1):
+            sol[-1] = (-2 / dt ** 2 * a_current[j - 1][-1]
+                       - L(-1, nr - 1, dr) / 2 * a_old[j - 1][-2]
+                       - (C(-1, nr - 1, k0p, dt, dz, dr) - chi(j - 1, nr - 1, t) - 1j / dt
+                          * D(a_current, j - 1, nr - 1, dz))
+                       * a_old[j - 1][-1]
+                       - 2 * np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j, nr - 1))) / (dt * dz)
+                       * (a_new[j][-1] - a_old[j][-1])
+                       + np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j + 1, nr - 1)))
+                       / (2 * dt * dz)
+                       * (a_new[j + 1][-1] - a_old[j + 1][-1]))
+            for k in prange(1, nr - 1):
                 d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) / 2 + 1j / dt * D(a_current, j - 1, k, dz)
                 sol[k] = (-2 / dt ** 2 * a_current[j - 1][k]
                           - L(-1, k, dr) / 2 * a_old[j - 1][k - 1]
@@ -231,6 +239,88 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
                           * (a_new[j][k] - a_old[j][k])
                           + np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j + 1, k))) / (2 * dt * dz)
                           * (a_new[j + 1][k] - a_old[j + 1][k]))
+                d_lower[k - 1] = L(-1, k, dr) / 2
+                d_upper[k - 1] = L(1, k - 1, dr) / 2
+            d_lower[-1] = L(-1, nr - 1, dr) / 2
+            d_upper[-1] = L(1, nr - 2, dr) / 2
+            a_new[j - 1] = TDMA(d_lower, d_main, d_upper, sol)
+        a_old = a_current
+        a_current = a_new
+    return a_new
+
+
+@njit(parallel=True)
+def solve_2d_test(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
+    """
+    Solve the 2D envelope equation (\nabla_tr^2+2i*k0/kp*d/dt+2*d^2/(dzdt)-d^2/dt^2)â = \chi*â
+    :param k0p: k0/kp = central laser wavenumber (2pi/lambda_0) / plasma skin depth
+    :param zmin: minimum value for zeta (nondimensionalized z-direction, zeta=k_p(z-ct))
+    :param zmax: maximum value for zeta
+    :param nz: number of grid points in zeta-direction
+    :param dt: size of tau step (nondimensionalized time, tau=k_pct)
+    :param nt: number of tau steps
+    :param rmax: maximum value for rho (minimum value is always 0). rho = k_p*r (nondimensionalized radius)
+    :param nr: number of rho steps
+    :param a0: value for â(z,r,0), array of dimensions (nz, nr)
+    :param aold: value for â(z,r,-1), array of dimensions (nz, nr)
+    :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
+    """
+    # a_old corresponds to a(z, r, t-1), a_current corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
+    a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
+    a_current = np.zeros((nz + 2, nr), dtype=np.complex128)
+    a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
+    a_old[0:-2] = aold
+    a_current[0:-2] = a0
+
+    dz = (zmax - zmin) / (nz - 1)
+    dr = rmax / (nr - 1)
+
+    for t in range(0, nt):
+        if t % 100 == 0:
+            print("Time =", t * dt)
+        # For every j, solve the tridiagonal system to calculate the solution over on the radius
+        for jiter in prange(0, nz):
+            j = nz - jiter
+            d_upper = np.zeros(nr - 1, dtype=np.complex128)
+            d_lower = np.zeros(nr - 1, dtype=np.complex128)
+            d_main = np.zeros(nr, dtype=np.complex128)
+            sol = np.zeros(nr, dtype=np.complex128)
+            # boundary conditions for k = 0 and k = nr - 1
+            d_main[0] = C(1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) / 2 + 1j / dt * D(a_current, j - 1, 0, dz)
+            d_main[-1] = (C(1, nr - 1, k0p, dt, dz, dr)
+                          - chi(j - 1, nr - 1, t) / 2 + 1j / dt * D(a_current, j - 1, nr - 1, dz))
+            sol[0] = (-2 / dt ** 2 * a_current[j - 1][0]
+                      - (C(-1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) - 1j / dt * D(a_current, j - 1, 0, dz))
+                      * a_old[j - 1][0]
+                      - L(1, 0, dr) / 2 * a_old[j - 1][1]
+                      - 2 * np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j, 0))) / (dt * dz)
+                      * (a_new[j][0] - a_old[j][0])
+                      + np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j + 1, 0))) / (2 * dt * dz)
+                      * (a_new[j + 1][0] - a_old[j + 1][0])
+                      + testfunc(zmin + (j - 1) * dz, zmax))
+            sol[-1] = (-2 / dt ** 2 * a_current[j - 1][-1]
+                       - L(-1, nr - 1, dr) / 2 * a_old[j - 1][-2]
+                       - (C(-1, nr - 1, k0p, dt, dz, dr) - chi(j - 1, nr - 1, t) - 1j / dt
+                          * D(a_current, j - 1, nr - 1, dz))
+                       * a_old[j - 1][-1]
+                       - 2 * np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j, nr - 1))) / (dt * dz)
+                       * (a_new[j][-1] - a_old[j][-1])
+                       + np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j + 1, nr - 1)))
+                       / (2 * dt * dz)
+                       * (a_new[j + 1][-1] - a_old[j + 1][-1])
+                       + testfunc(zmin + (j - 1) * dz, zmax))
+            for k in prange(1, nr - 1):
+                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) / 2 + 1j / dt * D(a_current, j - 1, k, dz)
+                sol[k] = (-2 / dt ** 2 * a_current[j - 1][k]
+                          - L(-1, k, dr) / 2 * a_old[j - 1][k - 1]
+                          - (C(-1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) - 1j / dt * D(a_current, j - 1, k, dz))
+                          * a_old[j - 1][k]
+                          - L(1, k, dr) / 2 * a_old[j - 1][k + 1]
+                          - 2 * np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j, k))) / (dt * dz)
+                          * (a_new[j][k] - a_old[j][k])
+                          + np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j + 1, k))) / (2 * dt * dz)
+                          * (a_new[j + 1][k] - a_old[j + 1][k])
+                          + testfunc(zmin + (j - 1) * dz, zmax))
                 d_lower[k - 1] = L(-1, k, dr) / 2
                 d_upper[k - 1] = L(1, k - 1, dr) / 2
             d_lower[-1] = L(-1, nr - 1, dr) / 2

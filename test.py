@@ -1,33 +1,62 @@
-from envelope_solver import *
-import matplotlib.pyplot as plt
 from wake_t.driver_witness import LaserPulse
+import aptools.plasma_accel.general_equations as ge
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.constants as ct
+from envelope_solver import solve_2d
+import time
 
-k0p = 20
+n_p = 1e18  # cm^-3
+s_d = ge.plasma_skin_depth(n_p)
+k_p = 1 / s_d
+w_p = ge.plasma_frequency(n_p)
+
+# laser parameters in SI units
+tau = 25e-15  # s
+w_0 = 20e-6  # m
+l_0 = 0.8e-6  # m
+z_c = 0.  # m
+a_0 = 1.
+k_0 = 2 * np.pi / l_0
+k0p = k_0 / k_p
+zR = ge.laser_rayleigh_length(w_0, l_0)
+zR_norm = zR / s_d
+
+# create laser pulse
+laser = LaserPulse(z_c, l_0=l_0, w_0=w_0, a_0=a_0, tau=tau, polarization='circular')
+
+# grid
+t_old = -1 / w_p  # calculate solution at tau = -1
+dist_to_focus = t_old * ct.c
 zmin = -10
 zmax = 10
-nz = 100
-dt = 1
-nt = 1500
-rmax = 5
-nr = 30
-a0 = 1.5
-sz = np.sqrt(2)
-sr = 1
-
+lrms = k_p * tau * ct.c
+nz = 101
+rmax = 25
+nr = 100
 Z = np.linspace(zmin, zmax, nz)
 R = np.linspace(0, rmax, nr)
 ZZ, RR = np.meshgrid(Z, R)
 
-a_2d0 = a0 / np.sqrt(2) * np.sqrt(np.exp(-ZZ ** 2 / (sz ** 2) - RR ** 2 / (sr ** 2)))
+a_2d0 = laser.get_a0_profile(RR * s_d, ZZ * s_d, 0)
+a_old = laser.get_a0_profile(RR * s_d, ZZ * s_d, dist_to_focus)
 
-laser = LaserPulse(0, l_0=1, w_0=2, a_0=1, tau=1)
-# a_2d0 = laser.get_a0_profile(ZZ, RR, np.sqrt(ZZ ** 2 + RR ** 2))  # uncomment this line for LaserPulse initial value
+dt = 1
+nt = 500
 
-a2d = solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a_2d0.T)
+start_time = time.time()
+a2d = solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a_2d0.T, a_old.T)
+print("--- %s seconds ---" % (time.time() - start_time))
+suminit = np.sum(np.abs(a_2d0))
+sumfinal = np.sum(np.abs(a2d))
+sumdiff = suminit - sumfinal
+sumdiffrel = sumdiff / suminit
+print("Sum of initial values: {:.3f}, sum of final values: {:.3f}, diff: {:.3f},"
+      " relative diff: {:.3f}".format(suminit, sumfinal, sumdiff, sumdiffrel))
 
 fig1 = plt.figure()
 ax = fig1.add_subplot(111, projection='3d')
-ax.plot_surface(ZZ, RR, a_2d0)
+ax.plot_surface(ZZ, RR, a_old)
 plt.title("Initial value")
 plt.xlabel("$\\zeta$")
 plt.ylabel("$\\rho$")
