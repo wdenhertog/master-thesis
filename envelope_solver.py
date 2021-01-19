@@ -13,17 +13,17 @@ def L(sign, k, dr):
     :return: L_k^{+-}
     """
     if k > 0:
-        if sign == 1 or sign == -1:
-            return (1 + sign * 1 / (2 * k)) / dr ** 2
+        if sign == 1. or sign == -1.:
+            return (1. + sign * 1. / (2. * k)) / dr ** 2
         else:
-            return -2 / dr ** 2
+            return -2. / dr ** 2
     else:
         if sign == 1:
-            return 4 / dr ** 2
+            return 4. / dr ** 2
         elif sign == 0:
-            return -4 / dr ** 2
+            return -4. / dr ** 2
         else:
-            return 0
+            return 0.
 
 
 @njit()
@@ -93,7 +93,7 @@ def D(a, j, k, dz):
 
 @njit()
 def chi(j, k, n):
-    return 0  # TODO: implement calculation of chi at time n and position (z,r) = (j,k).
+    return 0.  # TODO: implement calculation of chi at time n and position (z,r) = (j,k).
 
 
 @njit()
@@ -166,7 +166,7 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
 
 
 @njit()
-def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
+def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, a0m1):
     """
     Solve the 2D envelope equation (\nabla_tr^2+2i*k0/kp*d/dt+2*d^2/(dzdt)-d^2/dt^2)â = \chi*â
     :param k0p: k0/kp = central laser wavenumber (2pi/lambda_0) / plasma skin depth
@@ -184,7 +184,7 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
     a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
     a_current = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
-    a_old[0:-2] = a0  # TODO: implement function for a(z,r,-1)
+    a_old[0:-2] = a0m1
     a_current[0:-2] = a0
 
     dz = (zmax - zmin) / (nz - 1)
@@ -236,6 +236,6 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0):
             d_lower[-1] = L(-1, nr - 1, dr) / 2
             d_upper[-1] = L(1, nr - 2, dr) / 2
             a_new[j - 1] = TDMA(d_lower, d_main, d_upper, sol)
-        a_old = a_current
-        a_current = a_new
+        a_old[:] = a_current
+        a_current[:] = a_new
     return a_new
