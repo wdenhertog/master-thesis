@@ -1,11 +1,12 @@
 import cmath
 import numpy as np
 from numba import njit, prange
+import scipy.constants as ct
 
 
 @njit()
 def testfunc(z, zm):
-    return -4 * (z - zm)**2
+    return -4 * (z - zm) ** 2
 
 
 @njit()
@@ -44,9 +45,9 @@ def C(sign, k, k0p, dt, dz, dr):
     :return: C_k^{0,+-}
     """
     if dr == 0:
-        return L(-1, k, dr) / 2 + sign * 1j * k0p * 1 / dt - sign * 3 / 2 * 1 / (dt * dz)  # 1D case
+        return L(-1, k, dr) / 2 + sign * 1j * k0p / dt - sign * 3 / 2 * 1 / (dt * dz) - 1 / dt ** 2  # 1D case
     else:
-        return L(0, k, dr) / 2 + sign * 1j * k0p * 1 / dt - sign * 3 / 2 * 1 / (dt * dz) - 1 / dt ** 2  # 2D case
+        return L(0, k, dr) / 2 + sign * 1j * k0p / dt - sign * 3 / 2 * 1 / (dt * dz) - 1 / dt ** 2  # 2D case
 
 
 @njit()
@@ -69,7 +70,7 @@ def theta(a, j, k):
     :param k: the rho grid coordinate: 0<=k<nr
     :return: phase of â in â(z, r, t)
     """
-    return cmath.phase(a[j][k])
+    return cmath.phase(a[j, k])
 
 
 @njit()
@@ -147,9 +148,11 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
     """
     # Reserve 2 rows for the ghost grid points at j = nz and j = nz+1.
     # a_old corresponds to a(z, t-1), a_current corresponds to a(z, t) and a_new corresponds to a(z, t+1)
-    a_old = np.concatenate((a0, np.zeros(2))).astype(complex)
-    a_current = np.concatenate((a0, np.zeros(2))).astype(complex)
-    a_new = np.zeros(nz + 2, dtype=complex)
+    a_old = np.ones(nz + 2, dtype=np.complex128) - np.ones(nz + 2, dtype=np.complex128)
+    a_current = np.ones(nz + 2, dtype=np.complex128) - np.ones(nz + 2, dtype=np.complex128)
+    a_old[0:-2] = 0.99 * a0
+    a_current[0:-2] = a0
+    a_new = np.ones(nz + 2, dtype=np.complex128) - np.ones(nz + 2, dtype=np.complex128)
 
     dz = (zmax - zmin) / (nz - 1)
 
@@ -158,8 +161,9 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
 
     for n in range(0, nt):
         for j in range(nz, 0, -1):
-            factor_lhs = c0p + 1j / dt * D1D(a_current, j - 1, dz)
-            factor_rhs = (-(c0m - 1j / dt * D1D(a_current, j - 1, dz))
+            factor_lhs = c0p - chi(j - 1, 0, n) / 2 + 1j / dt * D1D(a_current, j - 1, dz)
+            factor_rhs = (-2 / dt ** 2 * a_current[j - 1]
+                          - (c0m - chi(j - 1, 0, n) / 2 - 1j / dt * D1D(a_current, j - 1, dz))
                           * a_old[j - 1]
                           - 2 * np.exp(1j * (theta1D(a_current, j - 1) - theta1D(a_current, j))) / (dt * dz)
                           * (a_new[j] - a_old[j])
@@ -200,8 +204,9 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
     for t in range(0, nt):
         if t % 100 == 0:
             print("Time =", t * dt)
-        # For every j, solve the tridiagonal system to calculate the solution over on the radius
-        for j in range(nz, 0, -1):
+        # For every j, solve the tridiagonal system to calculate the solution on the radius
+        for jiter in prange(0, nz):
+            j = nz - jiter
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
@@ -278,7 +283,7 @@ def solve_2d_test(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
     for t in range(0, nt):
         if t % 100 == 0:
             print("Time =", t * dt)
-        # For every j, solve the tridiagonal system to calculate the solution over on the radius
+        # For every j, solve the tridiagonal system to calculate the solution on the radius
         for jiter in prange(0, nz):
             j = nz - jiter
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
