@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 def a(z, r, zm, rm):
-    return (-r ** 2 + rm ** 2) * (z - zm) ** 2
+    return (-r ** 2 + rm ** 2) * (z - zm)
 
 
 zmin = -10
@@ -23,10 +23,10 @@ ZZ_copy, RR_copy = np.meshgrid(Z_copy, R)
 #     for j in range(nr):
 #         a_init[j, i] = (zmin + i * dz) * rmax ** 2
 
-dt = 10
+dt = 200
 nt = 1000
 
-k0p = 100
+k0p = 1
 
 func = a(ZZ, RR, zmax, rmax)
 # a_init = func

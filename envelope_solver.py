@@ -1,12 +1,11 @@
 import cmath
 import numpy as np
 from numba import njit, prange
-import scipy.constants as ct
 
 
 @njit()
 def testfunc(z, zm):
-    return -4 * (z - zm) ** 2
+    return -4 * (z - zm)
 
 
 @njit()
@@ -104,6 +103,21 @@ def chi(j, k, n):
 
 
 @njit()
+def rhs(a_old, a, a_new, j, k, n, dt, dr, dz, k0p, nr):
+    sol = (
+            - 2 / dt ** 2 * a[j, k]
+            - (C(-1, k, k0p, dt, dz, dr) - chi(j, k, n) / 2 - 1j / dt * D(a, j, k, dz)) * a_old[j, k]
+            - 2 * np.exp(1j * (theta(a, j, k) - theta(a, j + 1, k))) / (dz * dt) * (a_new[j + 1, k] - a_old[j + 1, k])
+            + np.exp(1j * (theta(a, j, k) - theta(a, j + 2, k))) / (2 * dz * dt) * (a_new[j + 2, k] - a_old[j + 2, k])
+    )
+    if k + 1 < nr:
+        sol -= L(1, k, dr) / 2 * a_old[j, k + 1]
+    if k > 0:
+        sol -= L(-1, k, dr) / 2 * a_old[j, k - 1]
+    return sol
+
+
+@njit()
 def TDMA(a, b, c, d):
     """
     TriDiagonal Matrix Algorithm: solve a linear system Ax=b, where A is a tridiagonal matrix.
@@ -191,66 +205,37 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
     :param aold: value for â(z,r,-1), array of dimensions (nz, nr)
     :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
     """
-    # a_old corresponds to a(z, r, t-1), a_current corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
+    # a_old corresponds to a(z, r, t-1), a corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
     a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
-    a_current = np.zeros((nz + 2, nr), dtype=np.complex128)
+    a = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_old[0:-2] = aold
-    a_current[0:-2] = a0
+    a[0:-2] = a0
 
     dz = (zmax - zmin) / (nz - 1)
     dr = rmax / (nr - 1)
 
-    for t in range(0, nt):
-        if t % 100 == 0:
-            print("Time =", t * dt)
+    for n in range(0, nt):
+        if n % 100 == 0:
+            print("Time =", n * dt)
         # For every j, solve the tridiagonal system to calculate the solution on the radius
-        for jiter in prange(0, nz):
-            j = nz - jiter
+        for j_iter in prange(0, nz):
+            j = nz - 1 - j_iter  # j starts at nz-1, ends at 0, done for parallelization purposes
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
-            # boundary conditions for k = 0 and k = nr - 1
-            d_main[0] = C(1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) / 2 + 1j / dt * D(a_current, j - 1, 0, dz)
-            d_main[-1] = (C(1, nr - 1, k0p, dt, dz, dr)
-                          - chi(j - 1, nr - 1, t) / 2 + 1j / dt * D(a_current, j - 1, nr - 1, dz))
-            sol[0] = (-2 / dt ** 2 * a_current[j - 1][0]
-                      - (C(-1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) - 1j / dt * D(a_current, j - 1, 0, dz))
-                      * a_old[j - 1][0]
-                      - L(1, 0, dr) / 2 * a_old[j - 1][1]
-                      - 2 * np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j, 0))) / (dt * dz)
-                      * (a_new[j][0] - a_old[j][0])
-                      + np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j + 1, 0))) / (2 * dt * dz)
-                      * (a_new[j + 1][0] - a_old[j + 1][0]))
-            sol[-1] = (-2 / dt ** 2 * a_current[j - 1][-1]
-                       - L(-1, nr - 1, dr) / 2 * a_old[j - 1][-2]
-                       - (C(-1, nr - 1, k0p, dt, dz, dr) - chi(j - 1, nr - 1, t) - 1j / dt
-                          * D(a_current, j - 1, nr - 1, dz))
-                       * a_old[j - 1][-1]
-                       - 2 * np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j, nr - 1))) / (dt * dz)
-                       * (a_new[j][-1] - a_old[j][-1])
-                       + np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j + 1, nr - 1)))
-                       / (2 * dt * dz)
-                       * (a_new[j + 1][-1] - a_old[j + 1][-1]))
-            for k in prange(1, nr - 1):
-                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) / 2 + 1j / dt * D(a_current, j - 1, k, dz)
-                sol[k] = (-2 / dt ** 2 * a_current[j - 1][k]
-                          - L(-1, k, dr) / 2 * a_old[j - 1][k - 1]
-                          - (C(-1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) - 1j / dt * D(a_current, j - 1, k, dz))
-                          * a_old[j - 1][k]
-                          - L(1, k, dr) / 2 * a_old[j - 1][k + 1]
-                          - 2 * np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j, k))) / (dt * dz)
-                          * (a_new[j][k] - a_old[j][k])
-                          + np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j + 1, k))) / (2 * dt * dz)
-                          * (a_new[j + 1][k] - a_old[j + 1][k]))
-                d_lower[k - 1] = L(-1, k, dr) / 2
-                d_upper[k - 1] = L(1, k - 1, dr) / 2
-            d_lower[-1] = L(-1, nr - 1, dr) / 2
-            d_upper[-1] = L(1, nr - 2, dr) / 2
-            a_new[j - 1] = TDMA(d_lower, d_main, d_upper, sol)
-        a_old = a_current
-        a_current = a_new
+
+            for k in range(0, nr):
+                sol[k] = rhs(a_old, a, a_new, j, k, n, dt, dr, dz, k0p, nr)
+                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j, k, n) / 2 + 1j / dt * D(a, j, k, dz)
+                if k < nr-1:
+                    d_upper[k] = L(1, k, dr) / 2
+                if k > 0:
+                    d_lower[k-1] = L(-1, k, dr) / 2
+            a_new[j] = TDMA(d_lower, d_main, d_upper, sol)
+        a_old[:] = a
+        a[:] = a_new
     return a_new
 
 
@@ -270,67 +255,35 @@ def solve_2d_test(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
     :param aold: value for â(z,r,-1), array of dimensions (nz, nr)
     :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
     """
-    # a_old corresponds to a(z, r, t-1), a_current corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
+    # a_old corresponds to a(z, r, t-1), a corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
     a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
-    a_current = np.zeros((nz + 2, nr), dtype=np.complex128)
+    a = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_old[0:-2] = aold
-    a_current[0:-2] = a0
+    a[0:-2] = a0
 
     dz = (zmax - zmin) / (nz - 1)
     dr = rmax / (nr - 1)
 
-    for t in range(0, nt):
-        if t % 100 == 0:
-            print("Time =", t * dt)
+    for n in range(0, nt):
+        if n % 100 == 0:
+            print("Time =", n * dt)
         # For every j, solve the tridiagonal system to calculate the solution on the radius
-        for jiter in prange(0, nz):
-            j = nz - jiter
+        for j_iter in prange(0, nz):
+            j = nz - 1 - j_iter  # j starts at nz-1, ends at 0, done for parallelization purposes
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
-            # boundary conditions for k = 0 and k = nr - 1
-            d_main[0] = C(1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) / 2 + 1j / dt * D(a_current, j - 1, 0, dz)
-            d_main[-1] = (C(1, nr - 1, k0p, dt, dz, dr)
-                          - chi(j - 1, nr - 1, t) / 2 + 1j / dt * D(a_current, j - 1, nr - 1, dz))
-            sol[0] = (-2 / dt ** 2 * a_current[j - 1][0]
-                      - (C(-1, 0, k0p, dt, dz, dr) - chi(j - 1, 0, t) - 1j / dt * D(a_current, j - 1, 0, dz))
-                      * a_old[j - 1][0]
-                      - L(1, 0, dr) / 2 * a_old[j - 1][1]
-                      - 2 * np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j, 0))) / (dt * dz)
-                      * (a_new[j][0] - a_old[j][0])
-                      + np.exp(1j * (theta(a_current, j - 1, 0) - theta(a_current, j + 1, 0))) / (2 * dt * dz)
-                      * (a_new[j + 1][0] - a_old[j + 1][0])
-                      + testfunc(zmin + (j - 1) * dz, zmax))
-            sol[-1] = (-2 / dt ** 2 * a_current[j - 1][-1]
-                       - L(-1, nr - 1, dr) / 2 * a_old[j - 1][-2]
-                       - (C(-1, nr - 1, k0p, dt, dz, dr) - chi(j - 1, nr - 1, t) - 1j / dt
-                          * D(a_current, j - 1, nr - 1, dz))
-                       * a_old[j - 1][-1]
-                       - 2 * np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j, nr - 1))) / (dt * dz)
-                       * (a_new[j][-1] - a_old[j][-1])
-                       + np.exp(1j * (theta(a_current, j - 1, nr - 1) - theta(a_current, j + 1, nr - 1)))
-                       / (2 * dt * dz)
-                       * (a_new[j + 1][-1] - a_old[j + 1][-1])
-                       + testfunc(zmin + (j - 1) * dz, zmax))
-            for k in prange(1, nr - 1):
-                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) / 2 + 1j / dt * D(a_current, j - 1, k, dz)
-                sol[k] = (-2 / dt ** 2 * a_current[j - 1][k]
-                          - L(-1, k, dr) / 2 * a_old[j - 1][k - 1]
-                          - (C(-1, k, k0p, dt, dz, dr) - chi(j - 1, k, t) - 1j / dt * D(a_current, j - 1, k, dz))
-                          * a_old[j - 1][k]
-                          - L(1, k, dr) / 2 * a_old[j - 1][k + 1]
-                          - 2 * np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j, k))) / (dt * dz)
-                          * (a_new[j][k] - a_old[j][k])
-                          + np.exp(1j * (theta(a_current, j - 1, k) - theta(a_current, j + 1, k))) / (2 * dt * dz)
-                          * (a_new[j + 1][k] - a_old[j + 1][k])
-                          + testfunc(zmin + (j - 1) * dz, zmax))
-                d_lower[k - 1] = L(-1, k, dr) / 2
-                d_upper[k - 1] = L(1, k - 1, dr) / 2
-            d_lower[-1] = L(-1, nr - 1, dr) / 2
-            d_upper[-1] = L(1, nr - 2, dr) / 2
-            a_new[j - 1] = TDMA(d_lower, d_main, d_upper, sol)
-        a_old = a_current
-        a_current = a_new
+
+            for k in range(0, nr):
+                sol[k] = rhs(a_old, a, a_new, j, k, n, dt, dr, dz, k0p, nr) + testfunc(zmin + j * dz, zmax)
+                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j, k, n) / 2 + 1j / dt * D(a, j, k, dz)
+                if k < nr-1:
+                    d_upper[k] = L(1, k, dr) / 2
+                if k > 0:
+                    d_lower[k-1] = L(-1, k, dr) / 2
+            a_new[j] = TDMA(d_lower, d_main, d_upper, sol)
+        a_old[:] = a
+        a[:] = a_new
     return a_new
