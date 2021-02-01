@@ -1,6 +1,6 @@
 import cmath
 import numpy as np
-from numba import njit, prange
+from numba import njit
 
 
 @njit()
@@ -14,7 +14,8 @@ def L(sign, k, dr):
     Calculation of L_k^{+-}
     :param sign: value -1, 0 or 1, which defines the -, 0, + symbol respectively
     :param k: the rho grid coordinate: 0<=k<=Np-1
-    :param dr: grid size in rho direction
+    :param dr: rho step
+    :param nr: amount of grid points in the rho direction
     :return: L_k^{+-}
     """
     if k > 0:
@@ -81,20 +82,21 @@ def D1D(a, j, dz):
     :param dz: zeta step
     :return: D_{j}^n
     """
-    return (-3 * theta1D(a, j) + 4 * theta1D(a, j + 1) - theta1D(a, j + 2)) / (2 * dz)
+    return cmath.phase(np.exp(1j * (-3 * theta1D(a, j) + 4 * theta1D(a, j + 1) - theta1D(a, j + 2)))) / (2 * dz)
 
 
 @njit()
 def D(a, j, k, dz):
     """
     Calculate D in Equation (6) from Benedetti - 2018
+    To account for the 'jumps' in the theta function, we return the phase of the complex exponent of the numerator in D.
     :param a: matrix â at a specific time t
     :param j: the zeta grid coordinate: 0<=j<nz
     :param k: the rho grid coordinate: 0<=k<nr
     :param dz: zeta step
-    :return: D_{j}^n
+    :return: D_{j,k}^n
     """
-    return (-3 * theta(a, j, k) + 4 * theta(a, j + 1, k) - theta(a, j + 2, k)) / (2 * dz)
+    return cmath.phase(np.exp(1j * (-3 * theta(a, j, k) + 4 * theta(a, j + 1, k) - theta(a, j + 2, k)))) / (2 * dz)
 
 
 @njit()
@@ -103,7 +105,22 @@ def chi(j, k, n):
 
 
 @njit()
-def rhs(a_old, a, a_new, j, k, n, dt, dr, dz, k0p, nr):
+def rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p):
+    """
+    The right-hand side of equation 7 in Benedetti, 2018
+    :param a_old: matrix of the values of â at former time step
+    :param a: matrix of the values of â at current time step
+    :param a_new: matrix of the values of â at next time step
+    :param j: the zeta grid coordinate: 0<=j<nz
+    :param dz: zeta step
+    :param k: the rho grid coordinate: 0<=k<nr
+    :param dr: rho step
+    :param nr: amount of points in the rho direction
+    :param n: the current time step: 0<=n<nt
+    :param dt: time step
+    :param k0p: k0/kp
+    :return: right-hand side of equation 7 in Benedetti, 2018
+    """
     sol = (
             - 2 / dt ** 2 * a[j, k]
             - (C(-1, k, k0p, dt, dz, dr) - chi(j, k, n) / 2 - 1j / dt * D(a, j, k, dz)) * a_old[j, k]
@@ -184,23 +201,23 @@ def solve_1d(k0p, zmin, zmax, nz, dt, nt, a0):
                           + np.exp(1j * (theta1D(a_current, j - 1) - theta1D(a_current, j + 1))) / (2 * dt * dz)
                           * (a_new[j + 1] - a_old[j + 1]))
             a_new[j - 1] = factor_rhs / factor_lhs
-        a_old = a_current
-        a_current = a_new
+        a_old[:] = a_current
+        a_current[:] = a_new
     return a_new
 
 
-@njit(parallel=True)
-def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
+@njit()
+def solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
     """
     Solve the 2D envelope equation (\nabla_tr^2+2i*k0/kp*d/dt+2*d^2/(dzdt)-d^2/dt^2)â = \chi*â
     :param k0p: k0/kp = central laser wavenumber (2pi/lambda_0) / plasma skin depth
     :param zmin: minimum value for zeta (nondimensionalized z-direction, zeta=k_p(z-ct))
     :param zmax: maximum value for zeta
     :param nz: number of grid points in zeta-direction
-    :param dt: size of tau step (nondimensionalized time, tau=k_pct)
-    :param nt: number of tau steps
     :param rmax: maximum value for rho (minimum value is always 0). rho = k_p*r (nondimensionalized radius)
     :param nr: number of rho steps
+    :param dt: size of tau step (nondimensionalized time, tau=k_pct)
+    :param nt: number of tau steps
     :param a0: value for â(z,r,0), array of dimensions (nz, nr)
     :param aold: value for â(z,r,-1), array of dimensions (nz, nr)
     :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
@@ -209,6 +226,7 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
     a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
     a = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
+
     a_old[0:-2] = aold
     a[0:-2] = a0
 
@@ -219,38 +237,37 @@ def solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
         if n % 100 == 0:
             print("Time =", n * dt)
         # For every j, solve the tridiagonal system to calculate the solution on the radius
-        for j_iter in prange(0, nz):
-            j = nz - 1 - j_iter  # j starts at nz-1, ends at 0, done for parallelization purposes
+        for j in range(nz - 1, -1, -1):
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
 
             for k in range(0, nr):
-                sol[k] = rhs(a_old, a, a_new, j, k, n, dt, dr, dz, k0p, nr)
+                sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p)
                 d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j, k, n) / 2 + 1j / dt * D(a, j, k, dz)
-                if k < nr-1:
+                if k < nr - 1:
                     d_upper[k] = L(1, k, dr) / 2
                 if k > 0:
-                    d_lower[k-1] = L(-1, k, dr) / 2
+                    d_lower[k - 1] = L(-1, k, dr) / 2
             a_new[j] = TDMA(d_lower, d_main, d_upper, sol)
         a_old[:] = a
         a[:] = a_new
     return a_new
 
 
-@njit(parallel=True)
-def solve_2d_test(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
+@njit()
+def solve_2d_test(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
     """
-    Solve the 2D envelope equation (\nabla_tr^2+2i*k0/kp*d/dt+2*d^2/(dzdt)-d^2/dt^2)â = \chi*â
+    Test the numerical method
     :param k0p: k0/kp = central laser wavenumber (2pi/lambda_0) / plasma skin depth
     :param zmin: minimum value for zeta (nondimensionalized z-direction, zeta=k_p(z-ct))
     :param zmax: maximum value for zeta
     :param nz: number of grid points in zeta-direction
-    :param dt: size of tau step (nondimensionalized time, tau=k_pct)
-    :param nt: number of tau steps
     :param rmax: maximum value for rho (minimum value is always 0). rho = k_p*r (nondimensionalized radius)
     :param nr: number of rho steps
+    :param dt: size of tau step (nondimensionalized time, tau=k_pct)
+    :param nt: number of tau steps
     :param a0: value for â(z,r,0), array of dimensions (nz, nr)
     :param aold: value for â(z,r,-1), array of dimensions (nz, nr)
     :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
@@ -259,6 +276,7 @@ def solve_2d_test(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
     a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
     a = np.zeros((nz + 2, nr), dtype=np.complex128)
     a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
+
     a_old[0:-2] = aold
     a[0:-2] = a0
 
@@ -269,20 +287,19 @@ def solve_2d_test(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a0, aold):
         if n % 100 == 0:
             print("Time =", n * dt)
         # For every j, solve the tridiagonal system to calculate the solution on the radius
-        for j_iter in prange(0, nz):
-            j = nz - 1 - j_iter  # j starts at nz-1, ends at 0, done for parallelization purposes
+        for j in range(nz - 1, -1, -1):
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
 
             for k in range(0, nr):
-                sol[k] = rhs(a_old, a, a_new, j, k, n, dt, dr, dz, k0p, nr) + testfunc(zmin + j * dz, zmax)
+                sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p) + testfunc(zmin + j * dz, zmax)
                 d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j, k, n) / 2 + 1j / dt * D(a, j, k, dz)
-                if k < nr-1:
+                if k < nr - 1:
                     d_upper[k] = L(1, k, dr) / 2
                 if k > 0:
-                    d_lower[k-1] = L(-1, k, dr) / 2
+                    d_lower[k - 1] = L(-1, k, dr) / 2
             a_new[j] = TDMA(d_lower, d_main, d_upper, sol)
         a_old[:] = a
         a[:] = a_new

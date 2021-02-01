@@ -27,18 +27,21 @@ print('Normalized Rayleigh length = {}'.format(zR_norm))
 laser_fb = GaussianLaser(a_0, w_0, tau, z_c, zf=0., lambda0=l_0)
 
 # grid
-zmin = -10
-zmax = 10
-nz = 400
-rmax = 40
-nr = 200
+l_rms = k_p * tau * ct.c
+resolution = 50  # amount of grid points per l_rms
+
+zmin = -5
+zmax = 5
+nz = int((zmax - zmin) * resolution / l_rms)
+rmax = 30
+nr = int(rmax * resolution / (5 * l_rms))  # dr = 5*dz
 Z = np.linspace(zmin, zmax, nz)
 R = np.linspace(0, rmax, nr)
 ZZ, RR = np.meshgrid(Z, R)
 
 # time
-dt = 1
-t_max = 1000
+dt = 10
+t_max = 2000
 nt = int(t_max / dt)
 
 # Get analytic laser envelope at t=0 and t=-1 (initial condition) and t=t_final
@@ -48,13 +51,13 @@ a_2dm1 = laser_fb.a_field(RR * s_d, 0, ZZ * s_d - dt / w_p * ct.c, -dt / w_p)
 a_2df = laser_fb.a_field(RR * s_d, 0, ZZ * s_d + t_max / w_p * ct.c, t_max / w_p)
 
 start_time = time.time()
-a2d = solve_2d(k0p, zmin, zmax, nz, dt, nt, rmax, nr, a_2d0.T, a_2dm1.T)
+a2d = solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a_2d0.T, a_2dm1.T)
 print("--- %s seconds ---" % (time.time() - start_time))
 
 sumend_theoretical = np.sum(np.abs(a_2df))
-sumdiff = np.sum(np.abs(a_2df-a2d[0:-2].T))
+sumdiff = np.sum(np.abs(a_2df - a2d[0:-2].T))
 sumdiffrel = sumdiff / sumend_theoretical
-print("diff: {:.3f}, relative diff: {:.3f}".format(sumdiff, sumdiffrel))
+print("sum of end values: {:.3f}, diff: {:.3f}, relative diff: {:.3f}".format(sumend_theoretical, sumdiff, sumdiffrel))
 
 fig1 = plt.figure()
 ax = fig1.add_subplot(111, projection='3d')
@@ -105,4 +108,19 @@ plt.title("Final solution at r=0.75*rmax")
 plt.xlabel("$\\zeta$")
 plt.ylabel("$\\|\hat{a}|$")
 
+plt.subplot(311)
+plt.imshow(np.abs(a_2d0), aspect='auto', origin='lower')
+plt.subplot(312)
+plt.imshow(np.abs(a2d[0:-2].T), aspect='auto', origin='lower')
+plt.subplot(313)
+plt.imshow(np.abs(a_2df), aspect='auto', origin='lower')
+
+# Compare central slice
+plt.figure()
+plt.plot(np.abs(a_2d0)[:, int(nz / 2)], label='initial (analytical)')
+plt.plot(np.abs(a_2df)[:, int(nz / 2)], label='final (analytical)')
+plt.plot(np.abs(a2d)[0:-2].T[:, int(nz / 2)], label='final (numerical)')
+plt.xlabel('r [arb. u.]')
+plt.ylabel('a')
+plt.legend()
 plt.show()
