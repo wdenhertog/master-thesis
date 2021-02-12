@@ -1,6 +1,7 @@
 import cmath
 import numpy as np
 from numba import njit
+import scipy.constants as ct
 
 
 @njit()
@@ -100,8 +101,16 @@ def D(a, j, k, dz):
 
 
 @njit()
-def chi(j, k, n):
-    return 0  # TODO: implement calculation of chi at time n and position (z,r) = (j,k).
+def chi_2(r, w_0, k_p):
+    # re = ct.physical_constants['classical electron radius'][0]
+    re = 2.8179403262e-15
+    dnc = 1 / (np.pi * re * w_0 ** 4 * 1e24)
+    return 1 + dnc * (r/k_p) ** 2
+
+
+@njit()
+def chi(n, j, k):
+    return 0
 
 
 @njit()
@@ -296,6 +305,58 @@ def solve_2d_test(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
             for k in range(0, nr):
                 sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p) + testfunc(zmin + j * dz, zmax)
                 d_main[k] = C(1, k, k0p, dt, dz, dr) - chi(j, k, n) / 2 + 1j / dt * D(a, j, k, dz)
+                if k < nr - 1:
+                    d_upper[k] = L(1, k, dr) / 2
+                if k > 0:
+                    d_lower[k - 1] = L(-1, k, dr) / 2
+            a_new[j] = TDMA(d_lower, d_main, d_upper, sol)
+        a_old[:] = a
+        a[:] = a_new
+    return a_new
+
+
+@njit()
+def solve_2d_chi(k0, kp, w0, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
+    """
+    Solve the 2D envelope equation (\nabla_tr^2+2i*k0/kp*d/dt+2*d^2/(dzdt)-d^2/dt^2)â = \chi*â
+    :param k0p: k0/kp = central laser wavenumber (2pi/lambda_0) / plasma skin depth
+    :param zmin: minimum value for zeta (nondimensionalized z-direction, zeta=k_p(z-ct))
+    :param zmax: maximum value for zeta
+    :param nz: number of grid points in zeta-direction
+    :param rmax: maximum value for rho (minimum value is always 0). rho = k_p*r (nondimensionalized radius)
+    :param nr: number of rho steps
+    :param dt: size of tau step (nondimensionalized time, tau=k_pct)
+    :param nt: number of tau steps
+    :param a0: value for â(z,r,0), array of dimensions (nz, nr)
+    :param aold: value for â(z,r,-1), array of dimensions (nz, nr)
+    :return: a[z][r], 2D array of the value of â at every point zmin<=z<=zmax, 0<=r<rmax and t = dt*nt
+    """
+    # a_old corresponds to a(z, r, t-1), a corresponds to a(z, r, t) and a_new corresponds to a(z, r, t+1)
+    a_old = np.zeros((nz + 2, nr), dtype=np.complex128)  # add 2 rows of ghost points in the zeta direction
+    a = np.zeros((nz + 2, nr), dtype=np.complex128)
+    a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
+
+    a_old[0:-2] = aold
+    a[0:-2] = a0
+
+    dz = (zmax - zmin) / (nz - 1)
+    dr = rmax / (nr - 1)
+
+    k0p = k0/kp
+
+    for n in range(0, nt):
+        if n % 100 == 0:
+            print("Time =", n * dt)
+        # For every j, solve the tridiagonal system to calculate the solution on the radius
+        for j in range(nz - 1, -1, -1):
+            d_upper = np.zeros(nr - 1, dtype=np.complex128)
+            d_lower = np.zeros(nr - 1, dtype=np.complex128)
+            d_main = np.zeros(nr, dtype=np.complex128)
+            sol = np.zeros(nr, dtype=np.complex128)
+
+            for k in range(0, nr):
+                sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p)
+                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi_2(k*dr, w0, kp) / 2 + 1j / dt * D(a, j, k, dz)
                 if k < nr - 1:
                     d_upper[k] = L(1, k, dr) / 2
                 if k > 0:

@@ -14,7 +14,7 @@ w_p = ge.plasma_frequency(n_p)
 # laser parameters in SI units
 tau = 25e-15  # s
 w_0 = 20e-6  # m
-l_0 = 0.8e-6 / 2  # m
+l_0 = 0.8e-6  # m
 z_c = 0.  # m
 a_0 = 1.
 k_0 = 2 * np.pi / l_0
@@ -28,12 +28,12 @@ laser_fb = GaussianLaser(a_0, w_0, tau, z_c, zf=0., lambda0=l_0)
 
 # grid
 l_rms = k_p * tau * ct.c
-resolution = 50  # amount of grid points per l_rms
+resolution = 30  # amount of grid points per l_rms
 
-zmin = -5
-zmax = 5
+zmin = -6
+zmax = 6
 nz = int((zmax - zmin) * resolution / l_rms)
-rmax = 30
+rmax = 80
 nr = int(rmax * resolution / (5 * l_rms))  # dr = 5*dz
 Z = np.linspace(zmin, zmax, nz)
 R = np.linspace(0, rmax, nr)
@@ -51,7 +51,7 @@ a_2dm1 = laser_fb.a_field(RR * s_d, 0, ZZ * s_d - dt / w_p * ct.c, -dt / w_p)
 a_2df = laser_fb.a_field(RR * s_d, 0, ZZ * s_d + t_max / w_p * ct.c, t_max / w_p)
 
 start_time = time.time()
-a2d = solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a_2d0.T, a_2dm1.T)
+a2d = solve_2d_chi(k_0, k_p, w_0, zmin, zmax, nz, rmax, nr, dt, nt, a_2d0.T, a_2dm1.T)
 print("--- %s seconds ---" % (time.time() - start_time))
 
 sumend_theoretical = np.sum(np.abs(a_2df))
@@ -124,3 +124,8 @@ plt.xlabel('r [arb. u.]')
 plt.ylabel('a')
 plt.legend()
 plt.show()
+
+phases = np.zeros((nz + 2, nr))
+for i in range(nz + 2):
+    for j in range(nr):
+        phases[i, j] = cmath.phase(a2d[i, j])
