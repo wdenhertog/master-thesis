@@ -28,7 +28,7 @@ laser_fb = GaussianLaser(a_0, w_0, tau, z_c, zf=0., lambda0=l_0)
 
 # grid
 l_rms = k_p * tau * ct.c
-resolution = 30  # amount of grid points per l_rms
+resolution = 60  # amount of grid points per l_rms
 
 zmin = -6
 zmax = 6
@@ -51,7 +51,7 @@ a_2dm1 = laser_fb.a_field(RR * s_d, 0, ZZ * s_d - dt / w_p * ct.c, -dt / w_p)
 a_2df = laser_fb.a_field(RR * s_d, 0, ZZ * s_d + t_max / w_p * ct.c, t_max / w_p)
 
 start_time = time.time()
-a2d = solve_2d_chi(k_0, k_p, w_0, zmin, zmax, nz, rmax, nr, dt, nt, a_2d0.T, a_2dm1.T)
+a2d = solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a_2d0.T, a_2dm1.T)
 print("--- %s seconds ---" % (time.time() - start_time))
 
 sumend_theoretical = np.sum(np.abs(a_2df))

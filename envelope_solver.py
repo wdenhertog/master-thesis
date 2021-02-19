@@ -97,7 +97,24 @@ def D(a, j, k, dz):
     :param dz: zeta step
     :return: D_{j,k}^n
     """
-    return cmath.phase(np.exp(1j * (-3 * theta(a, j, k) + 4 * theta(a, j + 1, k) - theta(a, j + 2, k)))) / (2 * dz)
+    # return cmath.phase(np.exp(1j * (-3 * theta(a, j, k) + 4 * theta(a, j + 1, k) - theta(a, j + 2, k)))) / (2 * dz)
+    # phase difference between adjacent points j, j+1, j+2
+    th1 = theta(a, j + 1, k)
+    d_theta1 = th1 - theta(a, j, k)
+    d_theta2 = theta(a, j + 2, k) - th1
+
+    # checking for phase jumps
+    if d_theta1 < -1.5 * np.pi:
+        d_theta1 += 2 * np.pi
+    if d_theta2 < -1.5 * np.pi:
+        d_theta2 += 2 * np.pi
+    if d_theta1 > 1.5 * np.pi:
+        d_theta1 -= 2 * np.pi
+    if d_theta2 > 1.5 * np.pi:
+        d_theta2 -= 2 * np.pi
+
+    # 1.5*d_theta1/dz-0.5*d_theta2/dz = (-1.5*th(j) + 2*th(j+1) - 0.5*th(j+2))/dz
+    return 1.5 * d_theta1 / dz - 0.5 * d_theta2 / dz
 
 
 @njit()
@@ -105,7 +122,7 @@ def chi_2(r, w_0, k_p):
     # re = ct.physical_constants['classical electron radius'][0]
     re = 2.8179403262e-15
     dnc = 1 / (np.pi * re * w_0 ** 4 * 1e24)
-    return 1 + dnc * (r/k_p) ** 2
+    return 1 + dnc * (r / k_p) ** 2
 
 
 @njit()
@@ -342,7 +359,7 @@ def solve_2d_chi(k0, kp, w0, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
     dz = (zmax - zmin) / (nz - 1)
     dr = rmax / (nr - 1)
 
-    k0p = k0/kp
+    k0p = k0 / kp
 
     for n in range(0, nt):
         if n % 100 == 0:
@@ -356,7 +373,7 @@ def solve_2d_chi(k0, kp, w0, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
 
             for k in range(0, nr):
                 sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p)
-                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi_2(k*dr, w0, kp) / 2 + 1j / dt * D(a, j, k, dz)
+                d_main[k] = C(1, k, k0p, dt, dz, dr) - chi_2(k * dr, w0, kp) / 2 + 1j / dt * D(a, j, k, dz)
                 if k < nr - 1:
                     d_upper[k] = L(1, k, dr) / 2
                 if k > 0:
