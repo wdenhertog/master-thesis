@@ -24,7 +24,7 @@ a_init = np.ones((nr, nz))
 a_old = np.copy(a_init)
 
 dt = 1000
-nt = 2000
+nt = 20000
 
 k0p = 100
 
