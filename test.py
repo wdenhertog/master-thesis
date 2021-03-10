@@ -35,8 +35,9 @@ zmax = 6
 nz = int((zmax - zmin) * resolution / l_rms)
 rmax = 80
 nr = int(rmax * resolution / (5 * l_rms))  # dr = 5*dz
+dr = rmax / nr
 Z = np.linspace(zmin, zmax, nz)
-R = np.linspace(0, rmax, nr)
+R = np.linspace(dr/2, rmax-dr/2, nr)
 ZZ, RR = np.meshgrid(Z, R)
 
 # time
@@ -52,12 +53,16 @@ a_2df = laser_fb.a_field(RR * s_d, 0, ZZ * s_d + t_max / w_p * ct.c, t_max / w_p
 
 start_time = time.time()
 a2d = solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a_2d0.T, a_2dm1.T)
+# a2d = solve_2d_chi(k_0, k_p, w_0, zmin, zmax, nz, rmax, nr, dt, nt, a_2d0.T, a_2dm1.T)
 print("--- %s seconds ---" % (time.time() - start_time))
 
 sumend_theoretical = np.sum(np.abs(a_2df))
-sumdiff = np.sum(np.abs(a_2df - a2d[0:-2].T))
+sumdiff = np.sum(np.abs(a_2df)) - np.sum(np.abs(a2d[0:-2].T))
+sumdiff_phase = np.sum(np.abs(a_2df - a2d[0:-2].T))
 sumdiffrel = sumdiff / sumend_theoretical
+sumdiffrel_phase = sumdiff_phase / sumend_theoretical
 print("sum of end values: {:.3f}, diff: {:.3f}, relative diff: {:.3f}".format(sumend_theoretical, sumdiff, sumdiffrel))
+print("diff (with phase diff): {:.3f}, relative diff: {:.3f}".format(sumdiff_phase, sumdiffrel_phase))
 
 fig1 = plt.figure()
 ax = fig1.add_subplot(111, projection='3d')
@@ -124,8 +129,3 @@ plt.xlabel('r [arb. u.]')
 plt.ylabel('a')
 plt.legend()
 plt.show()
-
-phases = np.zeros((nz + 2, nr))
-for i in range(nz + 2):
-    for j in range(nr):
-        phases[i, j] = cmath.phase(a2d[i, j])

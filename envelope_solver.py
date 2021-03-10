@@ -20,14 +20,14 @@ def L(sign, k, dr):
     """
     if k > 0:
         if sign == 1 or sign == -1:
-            return (1 + sign * 1 / (2 * k)) / dr ** 2
+            return (1 + sign * 1 / (2 * (k + 0.5))) / dr ** 2
         else:
             return -2 / dr ** 2
     else:
         if sign == 1:
-            return 4 / dr ** 2
+            return 2 / dr ** 2
         elif sign == 0:
-            return -4 / dr ** 2
+            return -2 / dr ** 2
         else:
             return 0
 
@@ -266,21 +266,22 @@ def solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
     a[0:-2] = a0
 
     dz = (zmax - zmin) / (nz - 1)
-    dr = rmax / (nr - 1)
+    dr = rmax / nr
 
     for n in range(0, nt):
         if n % 100 == 0:
             print("Time =", n * dt)
         # Solve the tridiagonal system for the solution on the radius
+        phases = np.angle(a[:, 0])
         for j in range(nz - 1, -1, -1):
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
 
-            th = cmath.phase(a[j, 0])
-            th1 = cmath.phase(a[j + 1, 0])
-            th2 = cmath.phase(a[j + 2, 0])
+            th = phases[j]
+            th1 = phases[j + 1]
+            th2 = phases[j + 2]
             for k in range(0, nr):
                 sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p, th,
                              th1, th2)
@@ -331,15 +332,16 @@ def solve_2d_test(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
         if n % 100 == 0:
             print("Time =", n * dt)
         # Solve the tridiagonal system for the solution on the radius
+        phases = np.angle(a[:, 0])
         for j in range(nz - 1, -1, -1):
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
 
-            th = cmath.phase(a[j, 0])
-            th1 = cmath.phase(a[j + 1, 0])
-            th2 = cmath.phase(a[j + 2, 0])
+            th = phases[j]
+            th1 = phases[j + 1]
+            th2 = phases[j + 2]
             for k in range(0, nr):
                 sol[k] = (rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p,
                               th, th1, th2)
@@ -394,15 +396,16 @@ def solve_2d_chi(k0, kp, w0, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
         if n % 100 == 0:
             print("Time =", n * dt)
         # Solve the tridiagonal system for the solution on the radius
+        phases = np.angle(a[:, 0])
         for j in range(nz - 1, -1, -1):
             d_upper = np.zeros(nr - 1, dtype=np.complex128)
             d_lower = np.zeros(nr - 1, dtype=np.complex128)
             d_main = np.zeros(nr, dtype=np.complex128)
             sol = np.zeros(nr, dtype=np.complex128)
 
-            th = cmath.phase(a[j, 0])
-            th1 = cmath.phase(a[j + 1, 0])
-            th2 = cmath.phase(a[j + 2, 0])
+            th = phases[j]
+            th1 = phases[j + 1]
+            th2 = phases[j + 2]
             for k in range(0, nr):
                 sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p, th,
                              th1, th2)
