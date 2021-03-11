@@ -145,9 +145,9 @@ def rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p, th, th1, th2):
             C(-1, k, k0p, dt, dz, dr)
             - chi(j, k, n) / 2 - 1j / dt * D(th, th1, th2, dz)) *
            a_old[j, k] - 2 * np.exp(1j * (th - th1)) / (dz * dt) * (
-                   a_new[j + 1, k] - a_old[j + 1, k]) + np.exp(
+                   a_new[0, k] - a_old[j + 1, k]) + np.exp(
                 1j * (th - th2)) / (2 * dz * dt) * (
-                   a_new[j + 2, k] - a_old[j + 2, k]))
+                   a_new[1, k] - a_old[j + 2, k]))
     if k + 1 < nr:
         sol -= L(1, k, dr) / 2 * a_old[j, k + 1]
     if k > 0:
@@ -260,7 +260,9 @@ def solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
     # add 2 rows of ghost points in the zeta direction
     a_old = np.zeros((nz + 2, nr), dtype=np.complex128)
     a = np.zeros((nz + 2, nr), dtype=np.complex128)
-    a_new = np.zeros((nz + 2, nr), dtype=np.complex128)
+
+    # a_new is a 2 x nr array to store new values of a
+    a_new = np.zeros((2, nr), dtype=np.complex128)
 
     a_old[0:-2] = aold
     a[0:-2] = a0
@@ -292,10 +294,13 @@ def solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
                     d_upper[k] = L(1, k, dr) / 2
                 if k > 0:
                     d_lower[k - 1] = L(-1, k, dr) / 2
-            a_new[j] = TDMA(d_lower, d_main, d_upper, sol)
-        a_old[:] = a
-        a[:] = a_new
-    return a_new
+            a_old[j + 2] = a[j + 2]
+            a[j + 2] = a_new[1]
+            a_new[1] = a_new[0]
+            a_new[0] = TDMA(d_lower, d_main, d_upper, sol)
+        a_old[0:2] = a[0:2]
+        a[0] = a_new[0]
+    return a
 
 
 @njit()
