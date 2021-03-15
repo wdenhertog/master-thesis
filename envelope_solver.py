@@ -391,7 +391,7 @@ def solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
 
             # Fill the vectors according to the numerical scheme.
             for k in range(0, nr):
-                sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p, th,
+                sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, dt, k0p, th,
                              th1, th2)
                 d_main[k] = (C(1, k, k0p, dt, dz, dr)
                              - chi() / 2
@@ -473,8 +473,8 @@ def solve_2d_test(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
             th1 = phases[j + 1]
             th2 = phases[j + 2]
             for k in range(0, nr):
-                sol[k] = (rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p,
-                              th, th1, th2)
+                sol[k] = (rhs(a_old, a, a_new, j, dz, k, dr, nr, dt, k0p, th,
+                              th1, th2)
                           + testfunc(zmin + j * dz, zmax))
                 d_main[k] = (C(1, k, k0p, dt, dz, dr)
                              - chi() / 2
@@ -553,7 +553,7 @@ def solve_2d_chi(k0, kp, w0, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
             th1 = phases[j + 1]
             th2 = phases[j + 2]
             for k in range(0, nr):
-                sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, n, dt, k0p, th,
+                sol[k] = rhs(a_old, a, a_new, j, dz, k, dr, nr, dt, k0p, th,
                              th1, th2)
                 d_main[k] = (C(1, k, k0p, dt, dz, dr)
                              - chi_2(k * dr, w0, kp) / 2
