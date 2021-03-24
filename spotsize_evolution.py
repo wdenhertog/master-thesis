@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def spotsize(dn_c, dn, r_0, w_0, k_os, z):
@@ -9,11 +10,12 @@ def spotsize(dn_c, dn, r_0, w_0, k_os, z):
 if __name__ == '__main__':
     r_0 = 1
     dn_c = 1 / (np.pi * 2.8179403262e-15 * r_0 ** 2)
-    dn = 1
-    w_0 = 1
+    dn = dn_c
+    w_0 = 0.01
     l_0 = 1
     z_m = np.pi * r_0 ** 2 / l_0
-    k_os = (2/z_m)*np.sqrt(dn/dn_c)
+    k_os = (2 / z_m) * np.sqrt(dn / dn_c)
     z = np.linspace(0, 10, 100)
 
     w = spotsize(dn_c, dn, r_0, w_0, k_os, z)
+    plt.plot(z, w)
