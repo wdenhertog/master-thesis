@@ -378,8 +378,6 @@ def solve_2d(k0p, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
     dr = rmax / nr
 
     for n in range(0, nt):
-        if n % 100 == 0:
-            print("Time =", n * dt)
         # Getting the phases of the envelope at the radius.
         phases = np.angle(a[:, 0])
         for j in range(nz - 1, -1, -1):
@@ -537,8 +535,6 @@ def solve_2d_chi(k0, kp, w0, zmin, zmax, nz, rmax, nr, dt, nt, a0, aold):
     k0p = k0 / kp
 
     for n in range(0, nt):
-        if n % 100 == 0:
-            print("Time =", n * dt)
         # Solve the tridiagonal system for the solution on the radius
         phases = np.angle(a[:, 0])
         for j in range(nz - 1, -1, -1):
